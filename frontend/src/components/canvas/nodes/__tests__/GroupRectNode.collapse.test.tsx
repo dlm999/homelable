@@ -16,7 +16,7 @@ describe('GroupRectNode - Collapse/Expand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    ;(useCanvasStore as any).mockImplementation((selector: any) => {
+    ;(useCanvasStore as unknown as jest.Mock).mockImplementation((selector: (state: Record<string, unknown>) => unknown) => {
       const state = {
         setEditingGroupRectId: vi.fn(),
         toggleNodeCollapsed: mockToggle,
@@ -51,11 +51,11 @@ describe('GroupRectNode - Collapse/Expand', () => {
       position: { x: 0, y: 0 },
     }
 
-    const { container } = render(
+    render(
       <GroupRectNode id={node.id} data={node.data} selected={false} isConnecting={false} xPos={0} yPos={0} />
     )
 
-    const btn = container.querySelector('button')
+    const btn = document.querySelector('button')
     expect(btn).toBeTruthy()
   })
 
@@ -72,11 +72,11 @@ describe('GroupRectNode - Collapse/Expand', () => {
       position: { x: 0, y: 0 },
     }
 
-    const { container } = render(
+    render(
       <GroupRectNode id={node.id} data={node.data} selected={false} isConnecting={false} xPos={0} yPos={0} />
     )
 
-    const btn = container.querySelector('button')
+    const btn = document.querySelector('button')
     expect(btn?.style.transform).toContain('rotate(-90deg)')
   })
 
@@ -88,11 +88,11 @@ describe('GroupRectNode - Collapse/Expand', () => {
       position: { x: 0, y: 0 },
     }
 
-    const { container } = render(
+    render(
       <GroupRectNode id={node.id} data={node.data} selected={false} isConnecting={false} xPos={0} yPos={0} />
     )
 
-    const btn = container.querySelector('button')
+    const btn = document.querySelector('button')
     if (btn) {
       await user.click(btn)
       expect(mockToggle).toHaveBeenCalledWith('zone-1')
@@ -112,7 +112,7 @@ describe('GroupRectNode - Collapse/Expand', () => {
       position: { x: 0, y: 0 },
     }
 
-    const { container } = render(
+    render(
       <GroupRectNode id={node.id} data={node.data} selected={false} isConnecting={false} xPos={0} yPos={0} />
     )
 
@@ -132,11 +132,11 @@ describe('GroupRectNode - Collapse/Expand', () => {
       position: { x: 0, y: 0 },
     }
 
-    const { container } = render(
+    render(
       <GroupRectNode id={node.id} data={node.data} selected={false} isConnecting={false} xPos={0} yPos={0} />
     )
 
-    const div = container.querySelector('div')
+    const div = document.querySelector('div')
     expect(div?.style.opacity).toBe('0.6')
   })
 })
