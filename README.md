@@ -223,7 +223,9 @@ docker compose up -d mcp
 # MCP server is now listening on http://<your-homelab-ip>:8001
 ```
 
-> **Proxmox LXC / bare-metal (no Docker):** run `sudo bash scripts/lxc-mcp-install.sh`.
+> **Proxmox LXC / bare-metal (no Docker):** create the LXC via
+> [community-scripts/ProxmoxVE](https://github.com/community-scripts/ProxmoxVE) (or any
+> Debian/Ubuntu LXC), then inside it run `sudo bash scripts/lxc-mcp-install.sh`.
 > Installs a `homelable-mcp` systemd service, prompts for `MCP_API_KEY` / `MCP_SERVICE_KEY`
 > (auto-generated if you press Enter), and skips prompts if `mcp/.env` already exists.
 
