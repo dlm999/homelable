@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
+import { getVisibleNodeIds, filterVisibleEdges } from '@/utils/collapseFilter'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { SearchBar } from './SearchBar'
@@ -55,24 +56,16 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const theme = THEMES[activeTheme]
 
-  // Filter nodes and edges based on collapsed state
-  const getVisibleNodeIds = (): Set<string> => {
-    const visible = new Set<string>()
-    const queue = nodes.filter((n) => !n.parentId).map((n) => n.id)
-    while (queue.length > 0) {
-      const id = queue.shift()!
-      visible.add(id)
-      const node = nodes.find((n) => n.id === id)
-      if (node && !node.data.custom_colors?.collapsed) {
-        const children = nodes.filter((n) => n.parentId === id).map((n) => n.id)
-        queue.push(...children)
-      }
-    }
-    return visible
-  }
-  const visibleNodeIds = getVisibleNodeIds()
-  const visibleNodes = nodes.filter((n) => visibleNodeIds.has(n.id))
-  const visibleEdges = edges.filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
+  // Filter nodes and edges based on collapsed state (memoized — O(n)).
+  const visibleNodeIds = useMemo(() => getVisibleNodeIds(nodes), [nodes])
+  const visibleNodes = useMemo(
+    () => nodes.filter((n) => visibleNodeIds.has(n.id)),
+    [nodes, visibleNodeIds],
+  )
+  const visibleEdges = useMemo(
+    () => filterVisibleEdges(edges, visibleNodeIds),
+    [edges, visibleNodeIds],
+  )
 
   const onNodeClick = useCallback((e: React.MouseEvent, node: Node<NodeData>) => {
     if (e.ctrlKey || e.metaKey) {
