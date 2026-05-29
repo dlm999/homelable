@@ -416,20 +416,30 @@ describe('NodeModal', () => {
     expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(12)
   })
 
-  it('supports the full 1..48 range', () => {
+  it('supports the full 1..64 range (issue #20)', () => {
     const { onSubmit } = renderModal({ initial: BASE })
     const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
     expect(slider.min).toBe('1')
-    expect(slider.max).toBe('48')
-    fireEvent.change(slider, { target: { value: '48' } })
+    expect(slider.max).toBe('64')
+    fireEvent.change(slider, { target: { value: '52' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(48)
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).bottom_handles).toBe(52)
   })
 
-  it('clamps pre-filled out-of-range values into [1,48]', () => {
+  it('clamps pre-filled out-of-range values into [1,64]', () => {
     renderModal({ initial: { ...BASE, bottom_handles: 9999 } })
     const slider = screen.getByLabelText('Bottom connection points slider') as HTMLInputElement
-    expect(slider.value).toBe('48')
+    expect(slider.value).toBe('64')
+  })
+
+  it('toggles show_port_numbers and submits it (issue #20)', () => {
+    const { onSubmit } = renderModal({ initial: BASE })
+    const toggle = screen.getByLabelText('Toggle port numbers')
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    expect((onSubmit.mock.calls[0][0] as Partial<NodeData>).show_port_numbers).toBe(true)
   })
 
   // ── Zigbee nodes ──────────────────────────────────────────────────────

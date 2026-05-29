@@ -32,6 +32,7 @@ export interface ApiNode extends Record<string, unknown> {
   width?: number | null
   height?: number | null
   bottom_handles?: number
+  show_port_numbers?: boolean
 }
 
 export interface ApiEdge {
@@ -114,6 +115,7 @@ export function serializeNode(n: Node<NodeData>): Record<string, unknown> {
     width: n.measured?.width ?? n.width ?? null,
     height: n.measured?.height ?? n.height ?? null,
     bottom_handles: clampBottomHandles(n.data.bottom_handles ?? 1),
+    show_port_numbers: n.data.show_port_numbers ?? false,
     pos_x: n.position.x,
     pos_y: n.position.y,
   }

@@ -37,7 +37,7 @@ export type TextPosition =
   | 'bottom-center'
   | 'bottom-right'
 
-export type EdgeType = 'ethernet' | 'wifi' | 'iot' | 'vlan' | 'virtual' | 'cluster'
+export type EdgeType = 'ethernet' | 'wifi' | 'iot' | 'vlan' | 'virtual' | 'cluster' | 'fibre'
 
 export type NodeStatus = 'online' | 'offline' | 'pending' | 'unknown'
 
@@ -106,8 +106,10 @@ export interface NodeData extends Record<string, unknown> {
    */
   collapsed?: boolean
   custom_icon?: string
-  /** Number of bottom connection points, 1..48. Default 1 (centered). */
+  /** Number of bottom connection points, 1..64. Default 1 (centered). */
   bottom_handles?: number
+  /** Show a port number (1..N) above each bottom connection point. */
+  show_port_numbers?: boolean
   /** Text node content (type === 'text') */
   text_content?: string
 }
@@ -173,6 +175,7 @@ export const EDGE_TYPE_LABELS: Record<EdgeType, string> = {
   vlan: 'VLAN',
   virtual: 'Virtual',
   cluster: 'Cluster',
+  fibre: 'Fibre',
 }
 
 export interface NodeTypeStyle {
