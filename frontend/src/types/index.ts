@@ -13,6 +13,8 @@ export type NodeType =
   | 'camera'
   | 'printer'
   | 'computer'
+  | 'laptop'
+  | 'mobile'
   | 'cpl'
   | 'docker_host'
   | 'docker_container'
@@ -35,7 +37,7 @@ export type TextPosition =
   | 'bottom-center'
   | 'bottom-right'
 
-export type EdgeType = 'ethernet' | 'wifi' | 'iot' | 'vlan' | 'virtual' | 'cluster'
+export type EdgeType = 'ethernet' | 'wifi' | 'iot' | 'vlan' | 'virtual' | 'cluster' | 'fibre'
 
 export type NodeStatus = 'online' | 'offline' | 'pending' | 'unknown'
 
@@ -97,9 +99,17 @@ export interface NodeData extends Record<string, unknown> {
     width?: number
     height?: number
   }
+  /**
+   * Collapsible zone state (type === 'groupRect'). When true, the zone hides
+   * its descendants on the canvas. Persisted via `custom_colors.collapsed`
+   * round-trip for back-compat with older saves.
+   */
+  collapsed?: boolean
   custom_icon?: string
-  /** Number of bottom connection points, 1..48. Default 1 (centered). */
+  /** Number of bottom connection points, 1..64. Default 1 (centered). */
   bottom_handles?: number
+  /** Show a port number (1..N) above each bottom connection point. */
+  show_port_numbers?: boolean
   /** Text node content (type === 'text') */
   text_content?: string
 }
@@ -137,6 +147,8 @@ export const NODE_TYPE_LABELS: Record<NodeType, string> = {
   camera: 'Camera',
   printer: 'Printer',
   computer: 'Computer',
+  laptop: 'Laptop',
+  mobile: 'Phone / Mobile',
   cpl: 'CPL / Powerline',
   docker_host: 'Docker Host',
   docker_container: 'Docker Container',
@@ -163,6 +175,7 @@ export const EDGE_TYPE_LABELS: Record<EdgeType, string> = {
   vlan: 'VLAN',
   virtual: 'Virtual',
   cluster: 'Cluster',
+  fibre: 'Fibre',
 }
 
 export interface NodeTypeStyle {

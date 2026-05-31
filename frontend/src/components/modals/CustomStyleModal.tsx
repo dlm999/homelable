@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import {
   Globe, Router, Network, Server, Layers, Box, Container, HardDrive,
-  Cpu, Wifi, Camera, Printer, Monitor, PlugZap, Anchor, Package, Circle, Flame,
+  Cpu, Wifi, Camera, Printer, Monitor, Laptop, Smartphone, PlugZap, Anchor, Package, Circle, Flame,
   Radio, Zap, Lightbulb,
   type LucideIcon,
 } from 'lucide-react'
@@ -21,17 +21,17 @@ import { NODE_TYPE_LABELS, EDGE_TYPE_LABELS } from '@/types'
 
 const EDITABLE_NODE_TYPES: NodeType[] = [
   'isp', 'router', 'firewall', 'switch', 'server', 'proxmox', 'vm', 'lxc', 'nas',
-  'iot', 'ap', 'camera', 'printer', 'computer', 'cpl', 'docker_host',
+  'iot', 'ap', 'camera', 'printer', 'computer', 'laptop', 'mobile', 'cpl', 'docker_host',
   'docker_container', 'zigbee_coordinator', 'zigbee_router', 'zigbee_enddevice',
   'generic',
 ]
 
-const EDITABLE_EDGE_TYPES: EdgeType[] = ['ethernet', 'wifi', 'iot', 'vlan', 'virtual', 'cluster']
+const EDITABLE_EDGE_TYPES: EdgeType[] = ['ethernet', 'wifi', 'iot', 'vlan', 'virtual', 'cluster', 'fibre']
 
 const NODE_ICONS: Record<string, LucideIcon> = {
   isp: Globe, router: Router, firewall: Flame, switch: Network, server: Server, proxmox: Layers,
   vm: Box, lxc: Container, nas: HardDrive, iot: Cpu, ap: Wifi,
-  camera: Camera, printer: Printer, computer: Monitor, cpl: PlugZap,
+  camera: Camera, printer: Printer, computer: Monitor, laptop: Laptop, mobile: Smartphone, cpl: PlugZap,
   docker_host: Anchor, docker_container: Package,
   zigbee_coordinator: Radio, zigbee_router: Zap, zigbee_enddevice: Lightbulb,
   generic: Circle,

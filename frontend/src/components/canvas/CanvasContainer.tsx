@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { THEMES } from '@/utils/themes'
+import { computeCollapseInfo, rewireEdgesForCollapse } from '@/utils/collapseFilter'
 import { nodeTypes } from './nodes/nodeTypes'
 import { edgeTypes } from './edges/edgeTypes'
 import { SearchBar } from './SearchBar'
@@ -55,6 +56,17 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   const activeTheme = useThemeStore((s) => s.activeTheme)
   const theme = THEMES[activeTheme]
 
+  // Filter nodes and edges based on collapsed state (memoized — O(n)).
+  const collapseInfo = useMemo(() => computeCollapseInfo(nodes), [nodes])
+  const visibleNodes = useMemo(
+    () => nodes.filter((n) => collapseInfo.visibleIds.has(n.id)),
+    [nodes, collapseInfo],
+  )
+  const visibleEdges = useMemo(
+    () => rewireEdgesForCollapse(edges, nodes, collapseInfo.visibleIds, collapseInfo.hiddenBy),
+    [edges, nodes, collapseInfo],
+  )
+
   const onNodeClick = useCallback((e: React.MouseEvent, node: Node<NodeData>) => {
     if (e.ctrlKey || e.metaKey) {
       setSelectedNode(null)
@@ -90,8 +102,8 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
   return (
     <div className="w-full h-full" style={{ background: theme.colors.canvasBackground }}>
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnectProp}
