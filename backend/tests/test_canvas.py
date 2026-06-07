@@ -199,6 +199,24 @@ async def test_save_canvas_show_hardware_defaults_false(client: AsyncClient, hea
     assert canvas["nodes"][0]["show_hardware"] is False
 
 
+# Regression (#184): show_port_numbers was dropped by the save schema, so the
+# toggle reset on every reload.
+async def test_save_canvas_persists_show_port_numbers(client: AsyncClient, headers: dict):
+    n1 = node_payload(show_port_numbers=True)
+    await client.post("/api/v1/canvas/save", json={"nodes": [n1], "edges": [], "viewport": {}}, headers=headers)
+
+    canvas = (await client.get("/api/v1/canvas", headers=headers)).json()
+    assert canvas["nodes"][0]["show_port_numbers"] is True
+
+
+async def test_save_canvas_show_port_numbers_defaults_false(client: AsyncClient, headers: dict):
+    n1 = node_payload()
+    await client.post("/api/v1/canvas/save", json={"nodes": [n1], "edges": [], "viewport": {}}, headers=headers)
+
+    canvas = (await client.get("/api/v1/canvas", headers=headers)).json()
+    assert canvas["nodes"][0]["show_port_numbers"] is False
+
+
 async def test_save_canvas_hardware_fields_cleared_on_update(client: AsyncClient, headers: dict):
     n1 = node_payload(cpu_count=8, ram_gb=32.0)
     await client.post("/api/v1/canvas/save", json={"nodes": [n1], "edges": [], "viewport": {}}, headers=headers)

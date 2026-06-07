@@ -127,7 +127,7 @@ describe('api/client', () => {
 
   it('canvasApi.load GETs /canvas', () => {
     mod.canvasApi.load()
-    expect(api.get).toHaveBeenCalledWith('/canvas')
+    expect(api.get).toHaveBeenCalledWith('/canvas', expect.objectContaining({}))
   })
 
   it('canvasApi.save POSTs to /canvas/save with payload', () => {
@@ -156,6 +156,16 @@ describe('api/client', () => {
     mod.liveviewApi.load('k-1')
     expect(publicApi.get).toHaveBeenCalledWith('/liveview', { params: { key: 'k-1' } })
     expect(api.get).not.toHaveBeenCalled()
+  })
+
+  it('liveviewApi.load forwards design as design_id when provided', () => {
+    mod.liveviewApi.load('k-1', 'design-9')
+    expect(publicApi.get).toHaveBeenCalledWith('/liveview', { params: { key: 'k-1', design_id: 'design-9' } })
+  })
+
+  it('liveviewApi.getConfig hits the authenticated config endpoint', () => {
+    mod.liveviewApi.getConfig()
+    expect(api.get).toHaveBeenCalledWith('/liveview/config')
   })
 
   it('scanApi endpoints route correctly', () => {

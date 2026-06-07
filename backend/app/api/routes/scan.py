@@ -11,13 +11,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user
 from app.core.config import settings
 from app.db.database import AsyncSessionLocal, get_db
-from app.db.models import Edge, Node, PendingDevice, PendingDeviceLink, ScanRun
+from app.db.models import Design, Edge, Node, PendingDevice, PendingDeviceLink, ScanRun
 from app.schemas.nodes import NodeCreate
 from app.schemas.scan import PendingDeviceResponse, ScanRunResponse
 from app.services.scanner import request_cancel, run_scan
 from app.services.zigbee_service import build_zigbee_properties
 
 _ZIGBEE_TYPES = {"zigbee_coordinator", "zigbee_router", "zigbee_enddevice"}
+
+
+def build_mac_property(mac: str | None) -> list[dict[str, Any]]:
+    """Build a NodeProperty list carrying a device MAC address.
+
+    Shape matches the frontend ``NodeProperty`` type
+    (``{key, value, icon, visible}``). Hidden by default — the user opts in to
+    showing it on the canvas card from the right panel. Returns an empty list
+    when no MAC is known.
+    """
+    if not mac:
+        return []
+    return [{"key": "MAC", "value": mac, "icon": None, "visible": False}]
+
+
+def merge_mac_property(
+    props: list[dict[str, Any]] | None, mac: str | None
+) -> list[dict[str, Any]]:
+    """Append a MAC NodeProperty to ``props`` unless one is already present.
+
+    Preserves any user-supplied properties (and an existing MAC row's
+    visibility) untouched. Used on approve so the scanned MAC is not lost.
+    """
+    out = [dict(p) for p in (props or [])]
+    if not mac or any(p.get("key") == "MAC" for p in out):
+        return out
+    out.append({"key": "MAC", "value": mac, "icon": None, "visible": False})
+    return out
 
 
 class BulkActionRequest(BaseModel):
@@ -118,6 +146,10 @@ async def bulk_approve_devices(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    # Determine target design (use first design as fallback)
+    first_design = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
+    default_design_id = first_design.id if first_design else None
+
     result = await db.execute(
         select(PendingDevice).where(
             PendingDevice.id.in_(payload.device_ids),
@@ -134,16 +166,18 @@ async def bulk_approve_devices(
             label=device.hostname or device.friendly_name or device.ip or "device",
             type=node_type,
             ip=device.ip,
+            mac=device.mac,
             hostname=device.hostname,
             status="online" if is_zigbee else "unknown",
             services=device.services or [],
             ieee_address=device.ieee_address,
             properties=build_zigbee_properties(
                 device.ieee_address, device.vendor, device.model, device.lqi
-            ) if is_zigbee else [],
+            ) if is_zigbee else build_mac_property(device.mac),
             # Default to ping so the status checker actually polls the new node.
             # Without this the scheduler skips it (check_method NULL → no check).
             check_method="none" if is_zigbee else ("ping" if device.ip else None),
+            design_id=default_design_id,
         )
         db.add(node)
         created_nodes.append(node)
@@ -227,6 +261,12 @@ async def approve_device(
     db: AsyncSession = Depends(get_db),
     _: str = Depends(get_current_user),
 ) -> dict[str, Any]:
+    # Determine target design
+    node_design_id = node_data.design_id
+    if node_design_id is None:
+        first = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
+        node_design_id = first.id if first else None
+
     device = await db.get(PendingDevice, device_id)
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
@@ -234,19 +274,24 @@ async def approve_device(
         raise HTTPException(status_code=409, detail="Device already processed")
     device.status = "approved"
     _is_zigbee = node_data.type in _ZIGBEE_TYPES
+    # Prefer the MAC discovered during the scan (stored on the pending device);
+    # fall back to whatever the approve payload carried.
+    _mac = device.mac or node_data.mac
     node = Node(
         label=node_data.label,
         type=node_data.type,
         ip=node_data.ip,
+        mac=_mac,
         hostname=node_data.hostname,
         status="online" if _is_zigbee else node_data.status,
         services=node_data.services or [],
         ieee_address=device.ieee_address,
         properties=build_zigbee_properties(
             device.ieee_address, device.vendor, device.model, device.lqi
-        ) if _is_zigbee else (node_data.properties or []),
+        ) if _is_zigbee else merge_mac_property(node_data.properties, _mac),
         check_method="none" if _is_zigbee else (node_data.check_method or ("ping" if node_data.ip else None)),
         check_target=None if _is_zigbee else node_data.check_target,
+        design_id=node_design_id,
     )
     db.add(node)
     await db.flush()
@@ -328,12 +373,18 @@ async def _resolve_pending_links_for_ieee(
         if (src_id, tgt_id) in existing_pairs or (tgt_id, src_id) in existing_pairs:
             await db.delete(link)
             continue
+        # Use the source node's design_id for the edge
+        edge_design_id = self_node.design_id if self_node else None
+        if edge_design_id is None:
+            first = (await db.execute(select(Design).order_by(Design.created_at).limit(1))).scalar()
+            edge_design_id = first.id if first else None
         edge = Edge(
             source=src_id,
             target=tgt_id,
             type="iot",
             source_handle="bottom",
             target_handle="top-t",
+            design_id=edge_design_id,
         )
         db.add(edge)
         await db.flush()

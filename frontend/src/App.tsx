@@ -20,6 +20,7 @@ import { LoginPage } from '@/components/LoginPage'
 import { NodeModal } from '@/components/modals/NodeModal'
 import { EdgeModal } from '@/components/modals/EdgeModal'
 import { ScanConfigModal } from '@/components/modals/ScanConfigModal'
+import { SettingsModal } from '@/components/modals/SettingsModal'
 import { ZigbeeImportModal } from '@/components/zigbee/ZigbeeImportModal'
 import { GroupRectModal, type GroupRectFormData } from '@/components/modals/GroupRectModal'
 import { TextModal, type TextFormData } from '@/components/modals/TextModal'
@@ -28,9 +29,10 @@ import { SearchModal } from '@/components/modals/SearchModal'
 import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
-import { canvasApi } from '@/api/client'
+import { canvasApi, designsApi, liveviewApi } from '@/api/client'
 import { demoNodes, demoEdges } from '@/utils/demoData'
 import { useStatusPolling } from '@/hooks/useStatusPolling'
 import type { NodeData, EdgeData, CustomStyleDef } from '@/types'
@@ -40,10 +42,11 @@ const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
 
 export default function App() {
-  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, copySelectedNodes, pasteNodes } = useCanvasStore()
+  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
+  const { activeDesignId, setDesigns, setActiveDesign } = useDesignStore()
 
   useStatusPolling()
 
@@ -67,31 +70,78 @@ export default function App() {
   const [pendingConnection, setPendingConnection] = useState<Connection | null>(null)
   const [editEdgeId, setEditEdgeId] = useState<string | null>(null)
   const [scanConfigOpen, setScanConfigOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [exportModalOpen, setExportModalOpen] = useState(false)
   const [zigbeeImportOpen, setZigbeeImportOpen] = useState(false)
 
-  // Declare handleSave before the Ctrl+S effect so it is in scope
-  const handleSave = useCallback(async () => {
+  // Declare handleSave before the Ctrl+S effect so it is in scope.
+  // Returns true on success, false on failure — the design-switch effect relies
+  // on this to avoid loading (and clobbering) the canvas when a save fails.
+  const handleSave = useCallback(async (designIdOverride?: string): Promise<boolean> => {
     try {
+      const saveDesignId = designIdOverride ?? activeDesignId
       if (STANDALONE) {
         localStorage.setItem(STANDALONE_STORAGE_KEY, JSON.stringify({ nodes, edges, theme_id: activeTheme, custom_style: customStyle }))
         markSaved()
         toast.success('Canvas saved')
-        return
+        return true
       }
       const nodesToSave = nodes.map(serializeNode)
       const edgesToSave = edges.map(serializeEdge)
-      await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport: { theme_id: activeTheme }, custom_style: customStyle })
+      await canvasApi.save({ nodes: nodesToSave, edges: edgesToSave, viewport: { theme_id: activeTheme }, custom_style: customStyle, design_id: saveDesignId })
       markSaved()
       toast.success('Canvas saved')
+      return true
     } catch {
       toast.error('Save failed')
+      return false
     }
-  }, [nodes, edges, markSaved, activeTheme, customStyle])
+  }, [nodes, edges, markSaved, activeTheme, customStyle, activeDesignId])
 
   // Keep a ref so the keydown handler always calls the latest version
   const handleSaveRef = useRef(handleSave)
   useEffect(() => { handleSaveRef.current = handleSave }, [handleSave])
+
+  const loadCanvasFromApi = useCallback(async (designId?: string) => {
+    try {
+      const res = await canvasApi.load(designId)
+      const { nodes: apiNodes, edges: apiEdges } = res.data
+      if (apiNodes.length > 0) {
+        const proxmoxContainerMap = new Map<string, boolean>(
+          (apiNodes as ApiNode[])
+            .filter((n) => n.type === 'group' || n.container_mode === true)
+            .map((n) => [n.id, true])
+        )
+        const rfNodes = (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap))
+        const rfEdges = (apiEdges as ApiEdge[]).map(deserializeApiEdge)
+        const savedTheme = res.data.viewport?.theme_id
+        if (savedTheme) setTheme(savedTheme)
+        if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
+        loadCanvas(rfNodes, rfEdges)
+      } else {
+        loadCanvas(demoNodes, demoEdges)
+      }
+    } catch {
+      loadCanvas(demoNodes, demoEdges)
+    }
+  }, [loadCanvas, setTheme, setCustomStyle])
+
+  const loadDesignsAndCanvas = useCallback(async () => {
+    if (STANDALONE) return
+    try {
+      const res = await designsApi.list()
+      const loadedDesigns = res.data
+      setDesigns(loadedDesigns)
+      const targetId = activeDesignId ?? loadedDesigns[0]?.id
+      if (targetId) {
+        setActiveDesign(targetId)
+        await loadCanvasFromApi(targetId)
+      }
+    } catch {
+      // If API fails (e.g. fresh DB with no designs), fall back to demo data
+      loadCanvas(demoNodes, demoEdges)
+    }
+  }, [setDesigns, setActiveDesign, loadCanvasFromApi, activeDesignId, loadCanvas])
 
   // Load canvas on auth (or immediately in standalone mode)
   useEffect(() => {
@@ -112,38 +162,59 @@ export default function App() {
       return
     }
     if (!isAuthenticated) return
-    canvasApi.load()
-      .then((res) => {
-        const { nodes: apiNodes, edges: apiEdges } = res.data
-        if (apiNodes.length > 0) {
-          // Build a map of container mode nodes to know if children should be nested
-          const proxmoxContainerMap = new Map<string, boolean>(
-            (apiNodes as ApiNode[])
-              .filter((n) => n.type === 'group' || n.container_mode === true)
-              .map((n) => [n.id, true])
-          )
-          const rfNodes = (apiNodes as ApiNode[]).map((n) => deserializeApiNode(n, proxmoxContainerMap))
-          const rfEdges = (apiEdges as ApiEdge[]).map(deserializeApiEdge)
-          const savedTheme = res.data.viewport?.theme_id
-          if (savedTheme) setTheme(savedTheme)
-          if (res.data.custom_style) setCustomStyle(res.data.custom_style as CustomStyleDef)
-          loadCanvas(rfNodes, rfEdges)
-        } else {
-          loadCanvas(demoNodes, demoEdges)
-        }
-      })
-      .catch(() => loadCanvas(demoNodes, demoEdges))
-  }, [isAuthenticated, loadCanvas, setTheme, setCustomStyle])
+    loadDesignsAndCanvas()
+  }, [isAuthenticated, loadCanvas, setTheme, setCustomStyle]) // only on auth change, not design change
+
+  // Reload canvas when active design changes (after initial load)
+  const initialLoadDone = useRef(false)
+  const prevDesignRef = useRef<string | null>(null)
+  // Set while we programmatically revert activeDesignId after a failed save, so
+  // the re-entrant effect run skips save/load and just re-syncs the refs.
+  const revertingRef = useRef(false)
+  useEffect(() => {
+    if (revertingRef.current) {
+      revertingRef.current = false
+      prevDesignRef.current = activeDesignId
+      return
+    }
+    if (!STANDALONE && isAuthenticated && activeDesignId && initialLoadDone.current) {
+      const oldId = prevDesignRef.current
+      // If the previous design was deleted (no longer in the list), don't try to
+      // save into it — just load the newly-selected design.
+      const oldStillExists = oldId ? useDesignStore.getState().designs.some((d) => d.id === oldId) : false
+      if (oldId && oldId !== activeDesignId && oldStillExists) {
+        // Save current (old) canvas data under the old design ID before switching.
+        // We call handleSave directly (not via ref) so it runs in this effect's
+        // closure where activeDesignId is already the NEW value — the override
+        // ensures data is stored under the correct design_id.
+        const targetId = activeDesignId
+        handleSave(oldId).then((ok) => {
+          if (ok) {
+            loadCanvasFromApi(targetId)
+          } else {
+            // Save failed: don't load the new design — that would overwrite the
+            // unsaved in-memory canvas. Revert the selection back to the old
+            // design so the UI matches the data still on screen.
+            toast.error('Switch cancelled — unsaved changes kept')
+            revertingRef.current = true
+            setActiveDesign(oldId)
+          }
+        })
+      } else {
+        loadCanvasFromApi(activeDesignId)
+      }
+    }
+    if (activeDesignId) {
+      prevDesignRef.current = activeDesignId
+      initialLoadDone.current = true
+    }
+  }, [activeDesignId])
 
   // Keep refs for store actions so keydown handler is always up-to-date without re-registering
   const undoRef = useRef(undo)
   const redoRef = useRef(redo)
-  const copyRef = useRef(copySelectedNodes)
-  const pasteRef = useRef(pasteNodes)
   useEffect(() => { undoRef.current = undo }, [undo])
   useEffect(() => { redoRef.current = redo }, [redo])
-  useEffect(() => { copyRef.current = copySelectedNodes }, [copySelectedNodes])
-  useEffect(() => { pasteRef.current = pasteNodes }, [pasteNodes])
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -157,8 +228,8 @@ export default function App() {
       if (ctrl && e.key === 'z') { e.preventDefault(); undoRef.current(); return }
       if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) { e.preventDefault(); redoRef.current(); return }
       if (ctrl && e.key === 'k') { e.preventDefault(); setSearchOpen(true); return }
-      if (ctrl && e.key === 'c' && !isInput) { copyRef.current(); return }
-      if (ctrl && e.key === 'v' && !isInput) { pasteRef.current(); return }
+      // Copy/paste (Ctrl/Cmd+C/V) handled in CanvasContainer so paste can place
+      // nodes under the cursor / viewport center.
       if (e.key === '?' && !isInput) { setShortcutsOpen(true); return }
     }
     window.addEventListener('keydown', handler)
@@ -384,6 +455,28 @@ export default function App() {
     }
   }, [nodes, edges, snapshotHistory, loadCanvas, markUnsaved])
 
+  // Open the read-only live view of the currently active design in a new tab.
+  // Standalone has no backend/key — it reads localStorage, so just open /view.
+  // Otherwise fetch the configured live view key and build /view?key=...&design=<id>.
+  const handleViewOnly = useCallback(async () => {
+    if (STANDALONE) {
+      window.open('/view', '_blank', 'noopener,noreferrer')
+      return
+    }
+    try {
+      const res = await liveviewApi.getConfig()
+      if (!res.data.enabled || !res.data.key) {
+        toast.error('Live view is disabled — set LIVEVIEW_KEY in the backend .env')
+        return
+      }
+      const params = new URLSearchParams({ key: res.data.key })
+      if (activeDesignId) params.set('design', activeDesignId)
+      window.open(`/view?${params.toString()}`, '_blank', 'noopener,noreferrer')
+    } catch {
+      toast.error('Failed to open live view')
+    }
+  }, [activeDesignId])
+
   const handleExport = useCallback(() => {
     const el = canvasRef.current?.querySelector<HTMLElement>('.react-flow')
     if (!el) { toast.error('Canvas not ready'); return }
@@ -513,6 +606,7 @@ export default function App() {
             onScan={() => setScanConfigOpen(true)}
             onZigbeeImport={() => setZigbeeImportOpen(true)}
             onSave={handleSave}
+            onOpenSettings={() => setSettingsOpen(true)}
             forceView={sidebarForceView}
             onOpenPending={openPendingModal}
           />
@@ -528,6 +622,7 @@ export default function App() {
               onExportMd={handleExportMd}
               onExportYaml={handleExportYaml}
               onImportYaml={handleImportYaml}
+              onViewOnly={handleViewOnly}
             />
             <div className="flex flex-1 min-h-0">
               <div ref={canvasRef} className="flex-1 min-w-0 h-full">
@@ -708,6 +803,10 @@ export default function App() {
           onOpenPending={(deviceId) => openPendingModal(deviceId)}
         />
         <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+        {!STANDALONE && (
+          <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        )}
 
         <PendingDevicesModal
           open={pendingModalOpen}

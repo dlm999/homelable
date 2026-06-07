@@ -5,9 +5,15 @@ import { useThemeStore } from '@/stores/themeStore'
 
 // ── Mock heavy dependencies ────────────────────────────────────────────────
 
+// Capture props passed to ReactFlow so we can assert zoom bounds etc.
+let rfProps: Record<string, unknown> = {}
+
 vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  ReactFlow: () => <div data-testid="react-flow" />,
+  ReactFlow: (props: Record<string, unknown>) => {
+    rfProps = props
+    return <div data-testid="react-flow" />
+  },
   Background: () => null,
   Controls: () => null,
   BackgroundVariant: { Dots: 'dots' },
@@ -49,6 +55,7 @@ const canvasPayload = {
 
 describe('LiveView (non-standalone)', () => {
   beforeEach(() => {
+    rfProps = {}
     vi.mocked(liveviewApi.load).mockReset()
     useCanvasStore.setState({ nodes: [], edges: [] })
   })
@@ -111,7 +118,26 @@ describe('LiveView (non-standalone)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('react-flow')).toBeDefined()
     })
-    expect(liveviewApi.load).toHaveBeenCalledWith('correct-key')
+    expect(liveviewApi.load).toHaveBeenCalledWith('correct-key', undefined)
+  })
+
+  it('forwards ?design=<id> to the API so a specific canvas is loaded', async () => {
+    setSearch('?key=correct-key&design=elec-123')
+    vi.mocked(liveviewApi.load).mockResolvedValue(canvasPayload as never)
+    render(<LiveView />)
+    await waitFor(() => expect(screen.getByTestId('react-flow')).toBeDefined())
+    expect(liveviewApi.load).toHaveBeenCalledWith('correct-key', 'elec-123')
+  })
+
+  it('allows zooming out to 0.25 so large infra fits (matches the editor)', async () => {
+    setSearch('?key=correct-key')
+    vi.mocked(liveviewApi.load).mockResolvedValue(canvasPayload as never)
+    render(<LiveView />)
+    await waitFor(() => expect(screen.getByTestId('react-flow')).toBeDefined())
+    // Without an explicit minZoom, React Flow defaults to 0.5 and big canvases
+    // can't zoom out far enough to fit.
+    expect(rfProps.minZoom).toBe(0.25)
+    expect(rfProps.maxZoom).toBe(2.5)
   })
 
   it('loads nodes into the canvas store on success', async () => {

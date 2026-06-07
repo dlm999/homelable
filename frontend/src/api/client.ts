@@ -28,12 +28,16 @@ export const authApi = {
 }
 
 export const canvasApi = {
-  load: () => api.get('/canvas'),
+  load: (design_id?: string) => {
+    const params = design_id ? { design_id } : {}
+    return api.get('/canvas', { params })
+  },
   save: (payload: {
     nodes: object[]
     edges: object[]
     viewport: object
     custom_style?: object | null
+    design_id?: string | null
   }) => api.post('/canvas/save', payload),
 }
 
@@ -49,7 +53,9 @@ export const edgesApi = {
 }
 
 export const liveviewApi = {
-  load: (key: string) => publicApi.get('/liveview', { params: { key } }),
+  load: (key: string, design?: string) =>
+    publicApi.get('/liveview', { params: { key, ...(design ? { design_id: design } : {}) } }),
+  getConfig: () => api.get<{ enabled: boolean; key: string | null }>('/liveview/config'),
 }
 
 export const scanApi = {
@@ -87,6 +93,15 @@ export const scanApi = {
 export const settingsApi = {
   get: () => api.get<{ interval_seconds: number }>('/settings'),
   save: (data: { interval_seconds: number }) => api.post<{ interval_seconds: number }>('/settings', data),
+}
+
+export const designsApi = {
+  list: () => api.get<import('@/types').Design[]>('/designs'),
+  create: (data: { name: string; icon?: string; design_type?: string }) =>
+    api.post<import('@/types').Design>('/designs', data),
+  update: (id: string, data: { name?: string; icon?: string }) =>
+    api.put<import('@/types').Design>(`/designs/${id}`, data),
+  delete: (id: string) => api.delete(`/designs/${id}`),
 }
 
 export const zigbeeApi = {

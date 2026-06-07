@@ -46,15 +46,12 @@ const makeNode = (id: string, status: NodeData['status'], type: NodeData['type']
   data: { label: id, type, status, services: [] },
 })
 
-const mockToggleHideIp = vi.fn()
 const mockLogout = vi.fn()
 
 function mockStore(overrides: Partial<ReturnType<typeof useCanvasStore>> = {}) {
   vi.mocked(useCanvasStore).mockReturnValue({
     nodes: [],
     hasUnsavedChanges: false,
-    hideIp: false,
-    toggleHideIp: mockToggleHideIp,
     addNode: vi.fn(),
     scanEventTs: 0,
     ...overrides,
@@ -73,6 +70,7 @@ const defaultProps = {
   onScan: vi.fn(),
   onZigbeeImport: vi.fn(),
   onSave: vi.fn(),
+  onOpenSettings: vi.fn(),
   onOpenPending: vi.fn(),
 }
 
@@ -190,16 +188,19 @@ describe('Sidebar', () => {
     expect(defaultProps.onSave).toHaveBeenCalledOnce()
   })
 
-  it('calls toggleHideIp when Hide IPs is clicked', () => {
+  // Regression (#186): the click handler must not forward the MouseEvent as an
+  // argument — handleSave treats its first arg as a designIdOverride, so leaking
+  // the event corrupts design_id and the save silently fails.
+  it('calls onSave with no arguments (does not leak the click event)', () => {
     render(<Sidebar {...defaultProps} />)
-    fireEvent.click(screen.getByText('Hide IPs'))
-    expect(mockToggleHideIp).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByText('Save Canvas'))
+    expect(defaultProps.onSave).toHaveBeenCalledWith()
   })
 
-  it('shows Show IPs label when hideIp is true', () => {
-    mockStore({ hideIp: true })
+  it('calls onOpenSettings when Settings is clicked', () => {
     render(<Sidebar {...defaultProps} />)
-    expect(screen.getByText('Show IPs')).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Settings'))
+    expect(defaultProps.onOpenSettings).toHaveBeenCalledOnce()
   })
 
   // ── Unsaved changes badge ──────────────────────────────────────────────────
@@ -257,14 +258,10 @@ describe('Sidebar', () => {
     await waitFor(() => expect(screen.queryByText('No scans yet')).not.toBeInTheDocument())
   })
 
-  it('toggles Settings panel on Settings click', async () => {
+  it('calls onOpenSettings when Settings is clicked', () => {
     render(<Sidebar {...defaultProps} />)
-    fireEvent.click(screen.getByText('Settings'))
-    await waitFor(() =>
-      expect(screen.getByText('Status check interval (s)')).toBeInTheDocument(),
-    )
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
-    expect(screen.queryByText('Status check interval (s)')).not.toBeInTheDocument()
+    expect(defaultProps.onOpenSettings).toHaveBeenCalledOnce()
   })
 
   // ── Logout ─────────────────────────────────────────────────────────────────

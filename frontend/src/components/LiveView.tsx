@@ -68,10 +68,14 @@ function LiveViewCanvas() {
     }
 
     // Already handled synchronously in useState initializer
-    const key = new URLSearchParams(window.location.search).get('key')
+    const search = new URLSearchParams(window.location.search)
+    const key = search.get('key')
     if (!key) return
+    // Optional ?design=<id> selects which canvas to render; backend falls back
+    // to the first design when omitted.
+    const design = search.get('design') ?? undefined
 
-    liveviewApi.load(key)
+    liveviewApi.load(key, design)
       .then((res) => {
         const { nodes: apiNodes, edges: apiEdges } = res.data
         const proxmoxMap = new Map<string, boolean>(
@@ -158,6 +162,8 @@ function LiveViewCanvas() {
         elementsSelectable={false}
         panOnDrag
         zoomOnScroll
+        minZoom={0.25}
+        maxZoom={2.5}
         colorMode={theme.colors.reactFlowColorMode}
         connectionMode={ConnectionMode.Loose}
         onNodeClick={onNodeClick}
