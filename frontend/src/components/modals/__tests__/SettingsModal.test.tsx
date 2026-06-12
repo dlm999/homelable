@@ -17,8 +17,8 @@ import { useCanvasStore } from '@/stores/canvasStore'
 describe('SettingsModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(settingsApi.get).mockResolvedValue({ data: { interval_seconds: 60 } } as never)
-    vi.mocked(settingsApi.save).mockResolvedValue({ data: { interval_seconds: 60 } } as never)
+    vi.mocked(settingsApi.get).mockResolvedValue({ data: { interval_seconds: 60, service_check_enabled: false, service_check_interval: 300 } } as never)
+    vi.mocked(settingsApi.save).mockResolvedValue({ data: { interval_seconds: 60, service_check_enabled: false, service_check_interval: 300 } } as never)
     vi.mocked(toast.success).mockReset()
     vi.mocked(toast.error).mockReset()
   })
@@ -47,7 +47,7 @@ describe('SettingsModal', () => {
     fireEvent.change(input, { target: { value: '180' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
-      expect(settingsApi.save).toHaveBeenCalledWith({ interval_seconds: 180 })
+      expect(settingsApi.save).toHaveBeenCalledWith({ interval_seconds: 180, service_check_enabled: false, service_check_interval: 300 })
       expect(toast.success).toHaveBeenCalledWith('Settings saved')
       expect(onClose).toHaveBeenCalled()
     })
@@ -74,6 +74,22 @@ describe('SettingsModal', () => {
     fireEvent.click(checkbox)
     expect(useCanvasStore.getState().hideIp).toBe(true)
     expect(localStorage.getItem('homelable.hideIp')).toBe('true')
+  })
+
+  it('loads and toggles the per-service check setting, saving its interval', async () => {
+    vi.mocked(settingsApi.get).mockResolvedValue({ data: { interval_seconds: 60, service_check_enabled: true, service_check_interval: 600 } } as never)
+    render(<SettingsModal open onClose={vi.fn()} />)
+    const toggle = await screen.findByLabelText('Toggle per-service status checks') as HTMLInputElement
+    // The toggle label renders immediately; its checked state only flips once
+    // settingsApi.get() resolves, so wait for that before asserting.
+    await waitFor(() => expect(toggle.checked).toBe(true))
+    expect(await screen.findByDisplayValue('600')).toBeDefined()
+
+    fireEvent.click(toggle) // disable
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      expect(settingsApi.save).toHaveBeenCalledWith({ interval_seconds: 60, service_check_enabled: false, service_check_interval: 600 })
+    })
   })
 
   it('calls onClose on Cancel', async () => {

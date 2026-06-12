@@ -46,6 +46,7 @@ htmlcov/
 *.db-shm
 *.db-wal
 *.db.back
+*.db.back-*
 
 # Docker
 .docker/

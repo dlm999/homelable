@@ -9,7 +9,7 @@ import {
   applyEdgeChanges,
   addEdge,
 } from '@xyflow/react'
-import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef } from '@/types'
+import type { NodeData, EdgeData, NodeType, EdgeType, NodeTypeStyle, EdgeTypeStyle, CustomStyleDef, ServiceStatus } from '@/types'
 import { generateUUID } from '@/utils/uuid'
 import { normalizeHandle, removedBottomHandleIds } from '@/utils/handleUtils'
 import { applyOpacity } from '@/utils/colorUtils'
@@ -21,6 +21,10 @@ type Clipboard = { nodes: Node<NodeData>[]; edges: Edge<EdgeData>[] }
 /** Resolve a node's effective parent id from either the RF field or domain data. */
 const parentIdOf = (n: Node<NodeData>): string | undefined => n.parentId ?? n.data.parent_id ?? undefined
 
+/** Key for the live per-service status overlay. */
+export const serviceStatusKey = (nodeId: string, port?: number, protocol?: string): string =>
+  `${nodeId}:${port ?? ''}/${protocol ?? ''}`
+
 interface CanvasState {
   nodes: Node<NodeData>[]
   edges: Edge<EdgeData>[]
@@ -28,6 +32,8 @@ interface CanvasState {
   selectedNodeId: string | null
   selectedNodeIds: string[]
   scanEventTs: number
+  // Live per-service status overlay (not persisted), keyed via serviceStatusKey.
+  serviceStatuses: Record<string, ServiceStatus>
 
   // History
   past: HistoryEntry[]
@@ -62,12 +68,16 @@ interface CanvasState {
   toggleNodeCollapsed: (id: string) => void
   createGroup: (nodeIds: string[], name: string) => void
   ungroup: (groupId: string) => void
+  addToGroup: (groupId: string, childId: string) => void
+  addToContainer: (containerId: string, childId: string) => void
+  removeFromGroup: (groupId: string, childId: string) => void
   markSaved: () => void
   markUnsaved: () => void
   loadCanvas: (nodes: Node<NodeData>[], edges: Edge<EdgeData>[]) => void
   fitViewPending: boolean
   clearFitViewPending: () => void
   notifyScanDeviceFound: () => void
+  setServiceStatuses: (nodeId: string, statuses: { port?: number; protocol?: string; status: ServiceStatus }[]) => void
   hideIp: boolean
   toggleHideIp: () => void
   setHideIp: (value: boolean) => void
@@ -86,6 +96,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
   editingTextId: null,
   hideIp: readHideIp(),
   scanEventTs: 0,
+  serviceStatuses: {},
   fitViewPending: false,
 
   past: [],
@@ -575,11 +586,136 @@ export const useCanvasStore = create<CanvasState>((set) => ({
       }
     }),
 
+  // Nest an existing top-level node inside a group. Inverse of removeFromGroup.
+  addToGroup: (groupId, childId) =>
+    set((state) => {
+      const group = state.nodes.find((n) => n.id === groupId)
+      const child = state.nodes.find((n) => n.id === childId)
+      if (!group || !child || group.data.type !== 'group') return state
+      if (child.id === groupId || child.parentId === groupId) return state
+
+      const updatedNodes = state.nodes.map((n) => {
+        if (n.id !== childId) return n
+        return {
+          ...n,
+          parentId: groupId,
+          extent: 'parent' as const,
+          // Absolute → group-relative. Clamp so the node stays inside the box.
+          position: {
+            x: Math.max(8, n.position.x - group.position.x),
+            y: Math.max(8, n.position.y - group.position.y),
+          },
+          selected: false,
+          data: { ...n.data, parent_id: groupId },
+        }
+      })
+
+      // React Flow requires the parent to precede its children in the array.
+      const others = updatedNodes.filter((n) => n.id !== childId)
+      const movedChild = updatedNodes.find((n) => n.id === childId)!
+      const groupIdx = others.findIndex((n) => n.id === groupId)
+      const nodes = [
+        ...others.slice(0, groupIdx + 1),
+        movedChild,
+        ...others.slice(groupIdx + 1),
+      ]
+
+      return {
+        nodes,
+        hasUnsavedChanges: true,
+        past: [...state.past.slice(-49), { nodes: state.nodes, edges: state.edges }],
+        future: [],
+      }
+    }),
+
+  // Nest an existing top-level node inside a container node (proxmox /
+  // docker_host / … in container_mode). Mirrors addToGroup but the target is
+  // any node with data.container_mode === true rather than a group.
+  addToContainer: (containerId, childId) =>
+    set((state) => {
+      const container = state.nodes.find((n) => n.id === containerId)
+      const child = state.nodes.find((n) => n.id === childId)
+      if (!container || !child || container.data.container_mode !== true) return state
+      if (child.id === containerId || child.parentId === containerId) return state
+
+      const updatedNodes = state.nodes.map((n) => {
+        if (n.id !== childId) return n
+        return {
+          ...n,
+          parentId: containerId,
+          extent: 'parent' as const,
+          // Absolute → container-relative. Clamp so the node stays inside.
+          position: {
+            x: Math.max(8, n.position.x - container.position.x),
+            y: Math.max(8, n.position.y - container.position.y),
+          },
+          selected: false,
+          data: { ...n.data, parent_id: containerId },
+        }
+      })
+
+      // React Flow requires the parent to precede its children in the array.
+      const others = updatedNodes.filter((n) => n.id !== childId)
+      const movedChild = updatedNodes.find((n) => n.id === childId)!
+      const containerIdx = others.findIndex((n) => n.id === containerId)
+      const nodes = [
+        ...others.slice(0, containerIdx + 1),
+        movedChild,
+        ...others.slice(containerIdx + 1),
+      ]
+
+      return {
+        nodes,
+        hasUnsavedChanges: true,
+        past: [...state.past.slice(-49), { nodes: state.nodes, edges: state.edges }],
+        future: [],
+      }
+    }),
+
+  // Release a single child from a group back to the canvas. Group stays.
+  removeFromGroup: (groupId, childId) =>
+    set((state) => {
+      const group = state.nodes.find((n) => n.id === groupId)
+      const child = state.nodes.find((n) => n.id === childId)
+      if (!group || !child || child.parentId !== groupId) return state
+
+      const nodes = state.nodes.map((n) => {
+        if (n.id !== childId) return n
+        return {
+          ...n,
+          parentId: undefined,
+          extent: undefined,
+          position: {
+            x: n.position.x + group.position.x,
+            y: n.position.y + group.position.y,
+          },
+          data: { ...n.data, parent_id: undefined },
+        }
+      })
+
+      return {
+        nodes,
+        hasUnsavedChanges: true,
+        past: [...state.past.slice(-49), { nodes: state.nodes, edges: state.edges }],
+        future: [],
+      }
+    }),
+
   markSaved: () => set({ hasUnsavedChanges: false }),
 
   markUnsaved: () => set({ hasUnsavedChanges: true }),
 
   notifyScanDeviceFound: () => set({ scanEventTs: Date.now() }),
+
+  setServiceStatuses: (nodeId, statuses) =>
+    set((state) => {
+      // Live overlay only — never touches node data, so it stays out of saves.
+      const next = { ...state.serviceStatuses }
+      for (const s of statuses) {
+        next[serviceStatusKey(nodeId, s.port, s.protocol)] = s.status
+      }
+      return { serviceStatuses: next }
+    }),
 
   toggleHideIp: () => set((s) => {
     const hideIp = !s.hideIp

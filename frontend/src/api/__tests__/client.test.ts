@@ -204,8 +204,8 @@ describe('api/client', () => {
   it('settingsApi get/save', () => {
     mod.settingsApi.get()
     expect(api.get).toHaveBeenCalledWith('/settings')
-    mod.settingsApi.save({ interval_seconds: 30 })
-    expect(api.post).toHaveBeenCalledWith('/settings', { interval_seconds: 30 })
+    mod.settingsApi.save({ interval_seconds: 30, service_check_enabled: true, service_check_interval: 600 })
+    expect(api.post).toHaveBeenCalledWith('/settings', { interval_seconds: 30, service_check_enabled: true, service_check_interval: 600 })
   })
 
   it('zigbeeApi.testConnection/importNetwork/importToPending', () => {

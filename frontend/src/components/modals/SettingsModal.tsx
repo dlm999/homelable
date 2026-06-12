@@ -20,6 +20,8 @@ interface SettingsModalProps {
 
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
   const [interval, setIntervalValue] = useState(60)
+  const [serviceCheckEnabled, setServiceCheckEnabled] = useState(false)
+  const [serviceInterval, setServiceInterval] = useState(300)
   const [saving, setSaving] = useState(false)
   const [alignment, setAlignment] = useState<AlignmentSettings>(readAlignmentSettings)
   const hideIp = useCanvasStore((s) => s.hideIp)
@@ -28,7 +30,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (!open || STANDALONE) return
     settingsApi.get()
-      .then((res) => setIntervalValue(res.data.interval_seconds))
+      .then((res) => {
+        setIntervalValue(res.data.interval_seconds)
+        setServiceCheckEnabled(res.data.service_check_enabled)
+        setServiceInterval(res.data.service_check_interval)
+      })
       .catch(() => {/* use default */})
   }, [open])
 
@@ -49,7 +55,11 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     }
     setSaving(true)
     try {
-      await settingsApi.save({ interval_seconds: interval })
+      await settingsApi.save({
+        interval_seconds: interval,
+        service_check_enabled: serviceCheckEnabled,
+        service_check_interval: serviceInterval,
+      })
       toast.success('Settings saved')
       onClose()
     } catch {
@@ -85,6 +95,36 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             <p className="text-[10px] text-muted-foreground leading-tight">
               How often node health is polled (ping, HTTP, SSH…)
             </p>
+
+            <label className="flex items-center justify-between gap-2 cursor-pointer pt-2">
+              <span className="text-xs text-foreground">Check services individually</span>
+              <input
+                type="checkbox"
+                checked={serviceCheckEnabled}
+                onChange={(e) => setServiceCheckEnabled(e.target.checked)}
+                className="cursor-pointer accent-[#00d4ff]"
+                aria-label="Toggle per-service status checks"
+              />
+            </label>
+
+            <div className={serviceCheckEnabled ? 'space-y-1.5' : 'space-y-1.5 opacity-50 pointer-events-none'}>
+              <label className="text-xs text-muted-foreground">Service check interval (s)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={30}
+                  max={3600}
+                  value={serviceInterval}
+                  onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setServiceInterval(v) }}
+                  className="w-24 px-2 py-1 rounded-md text-xs font-mono bg-[#0d1117] border border-border text-foreground focus:outline-none focus:border-[#00d4ff]"
+                  aria-label="Service check interval"
+                />
+                <span className="text-xs text-muted-foreground">seconds</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground leading-tight">
+                Probes each service port. Offline services turn red. Default 300s (5 min).
+              </p>
+            </div>
           </div>
           )}
 

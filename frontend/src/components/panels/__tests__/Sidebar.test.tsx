@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { Sidebar } from '../Sidebar'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -67,10 +67,12 @@ function mockAuth() {
 const defaultProps = {
   onAddNode: vi.fn(),
   onAddGroupRect: vi.fn(),
+  onAddText: vi.fn(),
   onScan: vi.fn(),
   onZigbeeImport: vi.fn(),
   onSave: vi.fn(),
   onOpenSettings: vi.fn(),
+  onOpenHistory: vi.fn(),
   onOpenPending: vi.fn(),
 }
 
@@ -243,19 +245,10 @@ describe('Sidebar', () => {
     expect(defaultProps.onOpenPending).toHaveBeenCalledWith(undefined, 'hidden')
   })
 
-  it('shows History panel when Scan History nav item is clicked', async () => {
+  it('calls onOpenHistory when Scan History nav item is clicked', () => {
     render(<Sidebar {...defaultProps} />)
     fireEvent.click(screen.getByText('Scan History'))
-    await waitFor(() => expect(screen.getByText('No scans yet')).toBeInTheDocument())
-  })
-
-  // Regression: forceView must not freeze local state across rerenders.
-  it('allows switching views after forceView is set by parent', async () => {
-    const { rerender } = render(<Sidebar {...defaultProps} forceView="history" />)
-    await waitFor(() => expect(screen.getByText('No scans yet')).toBeInTheDocument())
-    rerender(<Sidebar {...defaultProps} forceView="history" />)
-    fireEvent.click(screen.getByText('Canvas'))
-    await waitFor(() => expect(screen.queryByText('No scans yet')).not.toBeInTheDocument())
+    expect(defaultProps.onOpenHistory).toHaveBeenCalledOnce()
   })
 
   it('calls onOpenSettings when Settings is clicked', () => {

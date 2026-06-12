@@ -27,7 +27,9 @@ import { TextModal, type TextFormData } from '@/components/modals/TextModal'
 import { ThemeModal } from '@/components/modals/ThemeModal'
 import { SearchModal } from '@/components/modals/SearchModal'
 import { PendingDevicesModal } from '@/components/modals/PendingDevicesModal'
+import { ScanHistoryModal } from '@/components/modals/ScanHistoryModal'
 import { ShortcutsModal } from '@/components/modals/ShortcutsModal'
+import { ConfirmAddToGroupModal } from '@/components/modals/ConfirmAddToGroupModal'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -42,7 +44,7 @@ const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 const STANDALONE_STORAGE_KEY = 'homelable_canvas'
 
 export default function App() {
-  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo } = useCanvasStore()
+  const { loadCanvas, markSaved, markUnsaved, selectedNodeId, selectedNodeIds, addNode, updateNode, deleteNode, onConnect, updateEdge, deleteEdge, setProxmoxContainerMode, setNodeZIndex, editingGroupRectId, setEditingGroupRectId, editingTextId, setEditingTextId, nodes, edges, snapshotHistory, undo, redo, addToGroup, addToContainer } = useCanvasStore()
   const canvasRef = useRef<HTMLDivElement>(null)
   const { isAuthenticated } = useAuthStore()
   const { activeTheme, setTheme, customStyle, setCustomStyle } = useThemeStore()
@@ -52,7 +54,7 @@ export default function App() {
 
   const [themeModalOpen, setThemeModalOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [sidebarForceView, setSidebarForceView] = useState<'history' | undefined>(undefined)
+  const [scanHistoryOpen, setScanHistoryOpen] = useState(false)
   const [pendingModalOpen, setPendingModalOpen] = useState(false)
   const [pendingModalStatus, setPendingModalStatus] = useState<'pending' | 'hidden'>('pending')
   const [pendingHighlightId, setPendingHighlightId] = useState<string | undefined>(undefined)
@@ -68,6 +70,8 @@ export default function App() {
   const [addTextOpen, setAddTextOpen] = useState(false)
   const [editNodeId, setEditNodeId] = useState<string | null>(null)
   const [pendingConnection, setPendingConnection] = useState<Connection | null>(null)
+  const [pendingGroupAdd, setPendingGroupAdd] = useState<{ nodeId: string; groupId: string } | null>(null)
+  const [pendingContainerAdd, setPendingContainerAdd] = useState<{ nodeId: string; containerId: string } | null>(null)
   const [editEdgeId, setEditEdgeId] = useState<string | null>(null)
   const [scanConfigOpen, setScanConfigOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -607,7 +611,7 @@ export default function App() {
             onZigbeeImport={() => setZigbeeImportOpen(true)}
             onSave={handleSave}
             onOpenSettings={() => setSettingsOpen(true)}
-            forceView={sidebarForceView}
+            onOpenHistory={() => setScanHistoryOpen(true)}
             onOpenPending={openPendingModal}
           />
           <div className="flex flex-col flex-1 min-w-0">
@@ -631,6 +635,8 @@ export default function App() {
                   onEdgeDoubleClick={handleEdgeDoubleClick}
                   onNodeDoubleClick={handleNodeDoubleClick}
                   onNodeDragStart={snapshotHistory}
+                  onRequestAddToGroup={setPendingGroupAdd}
+                  onRequestAddToContainer={setPendingContainerAdd}
                   onOpenPending={(deviceId) => openPendingModal(deviceId)}
                 />
               </div>
@@ -645,7 +651,7 @@ export default function App() {
           onClose={() => setAddNodeOpen(false)}
           onSubmit={handleAddNode}
           title="Add Node"
-          parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type }))}
+          parentCandidates={nodes.map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))}
         />
 
         {/* key forces re-mount when editing a different node, resetting form state */}
@@ -672,7 +678,7 @@ export default function App() {
             }
             return nodes
               .filter((n) => !descendants.has(n.id))
-              .map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type }))
+              .map((n) => ({ id: n.id, label: n.data.label ?? n.id, type: n.data.type, container_mode: n.data.container_mode }))
           })()}
           currentNodeId={editNodeId ?? undefined}
         />
@@ -706,8 +712,6 @@ export default function App() {
             onClose={() => setScanConfigOpen(false)}
             onScanNow={() => {
               toast.success('Network scan started — check Scan History for results')
-              setSidebarForceView(undefined)
-              setTimeout(() => setSidebarForceView('history'), 0)
             }}
           />
         )}
@@ -718,9 +722,15 @@ export default function App() {
             onClose={() => setZigbeeImportOpen(false)}
             onAddToCanvas={handleZigbeeAddToCanvas}
             onPendingImported={() => {
-              setSidebarForceView(undefined)
-              setTimeout(() => setSidebarForceView('history'), 0)
+              toast.success('Zigbee import started — check Scan History for results')
             }}
+          />
+        )}
+
+        {!STANDALONE && (
+          <ScanHistoryModal
+            open={scanHistoryOpen}
+            onClose={() => setScanHistoryOpen(false)}
           />
         )}
 
@@ -803,6 +813,29 @@ export default function App() {
           onOpenPending={(deviceId) => openPendingModal(deviceId)}
         />
         <ShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+
+        <ConfirmAddToGroupModal
+          open={!!pendingGroupAdd}
+          nodeLabel={pendingGroupAdd ? (nodes.find((n) => n.id === pendingGroupAdd.nodeId)?.data.label ?? '') : ''}
+          targetLabel={pendingGroupAdd ? (nodes.find((n) => n.id === pendingGroupAdd.groupId)?.data.label ?? '') : ''}
+          onConfirm={() => {
+            if (pendingGroupAdd) addToGroup(pendingGroupAdd.groupId, pendingGroupAdd.nodeId)
+            setPendingGroupAdd(null)
+          }}
+          onCancel={() => setPendingGroupAdd(null)}
+        />
+
+        <ConfirmAddToGroupModal
+          open={!!pendingContainerAdd}
+          variant="container"
+          nodeLabel={pendingContainerAdd ? (nodes.find((n) => n.id === pendingContainerAdd.nodeId)?.data.label ?? '') : ''}
+          targetLabel={pendingContainerAdd ? (nodes.find((n) => n.id === pendingContainerAdd.containerId)?.data.label ?? '') : ''}
+          onConfirm={() => {
+            if (pendingContainerAdd) addToContainer(pendingContainerAdd.containerId, pendingContainerAdd.nodeId)
+            setPendingContainerAdd(null)
+          }}
+          onCancel={() => setPendingContainerAdd(null)}
+        />
 
         {!STANDALONE && (
           <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />

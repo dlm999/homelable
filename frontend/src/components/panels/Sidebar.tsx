@@ -1,11 +1,11 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, RefreshCw, Loader2, Square, Settings, StopCircle, LogOut, Network, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
+import { useState, useCallback } from 'react'
+import { Plus, Save, ScanLine, ChevronLeft, ChevronRight, LayoutDashboard, Clock, EyeOff, Square, Settings, LogOut, Network, Type, PlusCircle, Pencil, Trash2 } from 'lucide-react'
 import { Logo } from '@/components/ui/Logo'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useDesignStore } from '@/stores/designStore'
 import { useAuthStore } from '@/stores/authStore'
-import { designsApi, scanApi } from '@/api/client'
+import { designsApi } from '@/api/client'
 import { resolveDesignIcon, DEFAULT_DESIGN_ICON } from '@/utils/designIcons'
 import { DesignModal, type DesignFormData } from '@/components/modals/DesignModal'
 import type { Design } from '@/types'
@@ -14,23 +14,10 @@ import { useLatestRelease } from '@/hooks/useLatestRelease'
 
 const STANDALONE = import.meta.env.VITE_STANDALONE === 'true'
 
-type SidebarView = 'canvas' | 'history'
-
 const PENDING_TRIGGERS: { kind: 'pending' | 'hidden'; icon: typeof ScanLine; label: string }[] = [
   { kind: 'pending', icon: ScanLine, label: 'Pending Devices' },
   { kind: 'hidden', icon: EyeOff, label: 'Hidden Devices' },
 ]
-
-interface ScanRun {
-  id: string
-  status: string
-  kind?: string
-  ranges: string[]
-  devices_found: number
-  started_at: string
-  finished_at: string | null
-  error: string | null
-}
 
 interface SidebarProps {
   onAddNode: () => void
@@ -40,14 +27,12 @@ interface SidebarProps {
   onZigbeeImport: () => void
   onSave: () => void
   onOpenSettings: () => void
-  forceView?: SidebarView
+  onOpenHistory: () => void
   onOpenPending: (deviceId?: string, status?: 'pending' | 'hidden') => void
 }
 
-export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbeeImport, onSave, onOpenSettings, forceView, onOpenPending }: SidebarProps) {
+export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbeeImport, onSave, onOpenSettings, onOpenHistory, onOpenPending }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
-  const [activeView, setActiveView] = useState<SidebarView>(forceView ?? 'canvas')
-  const [prevForceView, setPrevForceView] = useState(forceView)
   const logout = useAuthStore((s) => s.logout)
   const { designs, activeDesignId, setActiveDesign, addDesign, updateDesign, removeDesign } = useDesignStore()
   const [designSwitcherOpen, setDesignSwitcherOpen] = useState(false)
@@ -80,15 +65,6 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
       toast.error('Failed to delete canvas')
     }
   }, [designs.length, removeDesign])
-
-  // forceView acts as a one-shot trigger from parent; user clicks afterwards still control view.
-  if (forceView !== prevForceView) {
-    setPrevForceView(forceView)
-    if (forceView) {
-      setActiveView(forceView)
-      setCollapsed(false)
-    }
-  }
 
   const { nodes, hasUnsavedChanges } = useCanvasStore()
 
@@ -193,8 +169,7 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
           icon={LayoutDashboard}
           label="Canvas"
           collapsed={collapsed}
-          active={activeView === 'canvas'}
-          onClick={() => setActiveView('canvas')}
+          active
         />
         {!STANDALONE && PENDING_TRIGGERS.map((t) => (
           <SidebarItem
@@ -210,23 +185,12 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
             icon={Clock}
             label="Scan History"
             collapsed={collapsed}
-            active={activeView === 'history'}
-            onClick={() => setActiveView('history')}
+            onClick={onOpenHistory}
           />
         )}
       </nav>
 
-      {/* View content (only when expanded) */}
-      {!collapsed && activeView !== 'canvas' && (
-        <div className="flex-1 min-h-0 overflow-y-auto border-t border-border">
-          {activeView === 'history' && <ScanHistoryPanel />}
-        </div>
-      )}
-
-      {/* Stats (only on canvas view) */}
-      {!collapsed && activeView === 'canvas' && (
-        <div className="flex-1" />
-      )}
+      {!collapsed && <div className="flex-1" />}
 
       {/* Stats footer */}
       {!collapsed && (
@@ -291,136 +255,6 @@ export function Sidebar({ onAddNode, onAddGroupRect, onAddText, onScan, onZigbee
         submitLabel={designModal?.mode === 'edit' ? 'Save' : 'Create'}
       />
     </aside>
-  )
-}
-
-
-function ScanHistoryPanel() {
-  const [runs, setRuns] = useState<ScanRun[]>([])
-  const [loading, setLoading] = useState(false)
-  const prevRunsRef = useRef<ScanRun[]>([])
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await scanApi.runs()
-      const next: ScanRun[] = res.data
-
-      // Surface transitions and refresh dependent UI
-      for (const run of next) {
-        const prev = prevRunsRef.current.find((r) => r.id === run.id)
-        if (prev?.status === 'running' && run.status === 'error') {
-          toast.error(`Scan failed: ${run.error ?? 'unknown error'}`)
-        }
-        if (prev?.status === 'running' && run.status === 'done') {
-          if (run.kind === 'zigbee') {
-            toast.success(`Zigbee import done — ${run.devices_found} device${run.devices_found !== 1 ? 's' : ''}`)
-          }
-          // Notify pending modal/canvas to refresh
-          useCanvasStore.getState().notifyScanDeviceFound()
-        }
-      }
-      prevRunsRef.current = next
-      setRuns(next)
-    } catch {
-      toast.error('Failed to load scan history')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  // Initial load
-  useEffect(() => { load() }, [load])
-
-  // Auto-refresh every 3s while any run is still running
-  useEffect(() => {
-    const hasRunning = runs.some((r) => r.status === 'running')
-    if (!hasRunning) return
-    const id = setInterval(load, 3000)
-    return () => clearInterval(id)
-  }, [runs, load])
-
-  const [stopping, setStopping] = useState<string | null>(null)
-
-  const handleStop = async (runId: string) => {
-    setStopping(runId)
-    try {
-      await scanApi.stop(runId)
-      toast.success('Scan stop requested')
-    } catch {
-      toast.error('Failed to stop scan')
-    } finally {
-      setStopping(null)
-    }
-  }
-
-  const statusColor = (s: string) =>
-    s === 'done' ? '#39d353'
-    : s === 'running' ? '#e3b341'
-    : s === 'error' ? '#f85149'
-    : s === 'cancelled' ? '#8b949e'
-    : '#8b949e'
-
-  return (
-    <div className="p-2">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">History</span>
-        <button onClick={load} className="text-muted-foreground hover:text-foreground p-0.5">
-          <RefreshCw size={12} />
-        </button>
-      </div>
-      {loading && runs.length === 0 && <Loader2 size={14} className="animate-spin text-muted-foreground mx-auto my-4" />}
-      {!loading && runs.length === 0 && (
-        <p className="text-xs text-muted-foreground text-center py-4">No scans yet</p>
-      )}
-      {runs.map((r) => (
-        <div key={r.id} className="mb-2 p-2 rounded-md bg-[#21262d] text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: statusColor(r.status) }} />
-            <span className="font-mono text-foreground capitalize">{r.status}</span>
-            {r.status === 'running' && <Loader2 size={10} className="animate-spin text-[#e3b341]" />}
-            <span
-              className="text-[9px] font-mono px-1 py-0.5 rounded uppercase tracking-wider"
-              style={r.kind === 'zigbee'
-                ? { background: '#00d4ff22', color: '#00d4ff' }
-                : { background: '#a855f722', color: '#a855f7' }}
-            >
-              {r.kind === 'zigbee' ? 'ZIG' : 'IP'}
-            </span>
-            <span className="ml-auto text-muted-foreground font-mono">{r.devices_found} found</span>
-            {r.status === 'running' && (
-              <Tooltip>
-                <TooltipTrigger>
-                  <button
-                    aria-label="Stop scan"
-                    onClick={() => handleStop(r.id)}
-                    disabled={stopping === r.id}
-                    className="p-0.5 text-[#f85149] hover:bg-[#f85149]/10 rounded transition-colors disabled:opacity-50"
-                  >
-                    {stopping === r.id
-                      ? <Loader2 size={11} className="animate-spin" />
-                      : <StopCircle size={11} />
-                    }
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="left">Stop scan</TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-          <div className="text-muted-foreground text-[10px] mt-0.5">
-            {new Date(r.started_at.endsWith('Z') ? r.started_at : r.started_at + 'Z').toLocaleString()}
-          </div>
-          {r.ranges.length > 0 && (
-            <div className="text-[#8b949e] text-[10px] font-mono truncate">{r.ranges.join(', ')}</div>
-          )}
-          {r.error && (
-            <div className="text-[#f85149] text-[10px] mt-1 leading-tight wrap-break-word whitespace-pre-wrap">
-              {r.error}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
   )
 }
 

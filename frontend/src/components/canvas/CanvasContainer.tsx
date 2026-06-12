@@ -30,10 +30,12 @@ interface CanvasContainerProps {
   onEdgeDoubleClick?: (edge: Edge<EdgeData>) => void
   onNodeDoubleClick?: (node: Node<NodeData>) => void
   onNodeDragStart?: () => void
+  onRequestAddToGroup?: (payload: { nodeId: string; groupId: string }) => void
+  onRequestAddToContainer?: (payload: { nodeId: string; containerId: string }) => void
   onOpenPending?: (deviceId: string) => void
 }
 
-export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, onNodeDoubleClick, onNodeDragStart, onOpenPending }: CanvasContainerProps) {
+export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, onNodeDoubleClick, onNodeDragStart, onRequestAddToGroup, onRequestAddToContainer, onOpenPending }: CanvasContainerProps) {
   const [lassoMode, setLassoMode] = useState(true)
   const {
     nodes, edges,
@@ -42,7 +44,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
     fitViewPending, clearFitViewPending,
     copySelectedNodes, pasteNodes,
   } = useCanvasStore()
-  const { fitView, screenToFlowPosition } = useReactFlow()
+  const { fitView, screenToFlowPosition, getIntersectingNodes } = useReactFlow<Node<NodeData>>()
 
   // Track the last cursor position over the canvas so paste lands under it.
   const cursorRef = useRef<{ x: number; y: number } | null>(null)
@@ -125,6 +127,24 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
 
   const { guides, onNodeDrag, onNodeDragStop } = useAlignmentGuides()
 
+  // Drop a top-level node onto a group → ask App to confirm adding it. Runs
+  // before the alignment snap so detection uses the dropped position.
+  const handleNodeDragStop = useCallback<NonNullable<typeof onNodeDragStop>>((event, dragNode, dragNodes) => {
+    if (dragNode && !dragNode.parentId &&
+        dragNode.data.type !== 'group' && dragNode.data.type !== 'groupRect') {
+      const intersecting = getIntersectingNodes(dragNode)
+      const group = intersecting.find((n) => n.data.type === 'group')
+      if (group) {
+        onRequestAddToGroup?.({ nodeId: dragNode.id, groupId: group.id })
+      } else {
+        // Any node in container_mode (proxmox, docker_host, …) accepts children.
+        const container = intersecting.find((n) => n.id !== dragNode.id && n.data.container_mode === true)
+        if (container) onRequestAddToContainer?.({ nodeId: dragNode.id, containerId: container.id })
+      }
+    }
+    onNodeDragStop(event, dragNode, dragNodes)
+  }, [onRequestAddToGroup, onRequestAddToContainer, getIntersectingNodes, onNodeDragStop])
+
   return (
     <div className="w-full h-full" style={{ background: theme.colors.canvasBackground }} onMouseMove={onMouseMove}>
       <ReactFlow
@@ -139,7 +159,7 @@ export function CanvasContainer({ onConnect: onConnectProp, onEdgeDoubleClick, o
         onNodeDoubleClick={handleNodeDoubleClick}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
+        onNodeDragStop={handleNodeDragStop}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         deleteKeyCode={['Backspace', 'Delete']}

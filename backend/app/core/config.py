@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # Status checker
     status_checker_interval: int = 60
 
+    # Per-service status checker (independent of node checks). Off by default.
+    service_check_enabled: bool = False
+    service_check_interval: int = 300
+
     # MCP service key — set MCP_SERVICE_KEY in .env
     # Used by the MCP server to authenticate against the backend without a user password.
     # Leave empty to disable MCP service key auth.
@@ -77,6 +81,10 @@ class Settings(BaseSettings):
                 self.scanner_ranges = data["scanner_ranges"]
             if "status_checker_interval" in data:
                 self.status_checker_interval = int(data["status_checker_interval"])
+            if "service_check_enabled" in data:
+                self.service_check_enabled = bool(data["service_check_enabled"])
+            if "service_check_interval" in data:
+                self.service_check_interval = int(data["service_check_interval"])
         except Exception:
             pass
 
@@ -86,6 +94,8 @@ class Settings(BaseSettings):
         self._override_path().write_text(json.dumps({
             "scanner_ranges": self.scanner_ranges,
             "status_checker_interval": self.status_checker_interval,
+            "service_check_enabled": self.service_check_enabled,
+            "service_check_interval": self.service_check_interval,
         }))
 
 

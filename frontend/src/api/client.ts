@@ -90,9 +90,15 @@ export const scanApi = {
   saveConfig: (data: { ranges: string[] }) => api.post('/scan/config', data),
 }
 
+export interface AppSettings {
+  interval_seconds: number
+  service_check_enabled: boolean
+  service_check_interval: number
+}
+
 export const settingsApi = {
-  get: () => api.get<{ interval_seconds: number }>('/settings'),
-  save: (data: { interval_seconds: number }) => api.post<{ interval_seconds: number }>('/settings', data),
+  get: () => api.get<AppSettings>('/settings'),
+  save: (data: AppSettings) => api.post<AppSettings>('/settings', data),
 }
 
 export const designsApi = {

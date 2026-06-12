@@ -1,10 +1,10 @@
-import { createElement, useState } from 'react'
+import { createElement, useRef, useState } from 'react'
 import { X, Edit, Trash2, ExternalLink, Plus, Pencil, Layers, Ungroup, Eye, EyeOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
-import { useCanvasStore } from '@/stores/canvasStore'
-import { NODE_TYPE_LABELS, STATUS_COLORS, type ServiceInfo, type NodeData, type NodeProperty } from '@/types'
+import { useCanvasStore, serviceStatusKey } from '@/stores/canvasStore'
+import { NODE_TYPE_LABELS, STATUS_COLORS, type ServiceInfo, type ServiceStatus, type NodeData, type NodeProperty } from '@/types'
 import { getServiceUrl } from '@/utils/serviceUrl'
 import { splitIps } from '@/utils/maskIp'
 import { PROPERTY_ICONS, PROPERTY_ICON_NAMES, resolvePropertyIcon } from '@/utils/propertyIcons'
@@ -21,7 +21,8 @@ type PropForm = { key: string; value: string; icon: string | null; visible: bool
 const EMPTY_PROP: PropForm = { key: '', value: '', icon: null, visible: true }
 
 export function DetailPanel({ onEdit }: DetailPanelProps) {
-  const { nodes, selectedNodeId, selectedNodeIds, setSelectedNode, deleteNode, updateNode, snapshotHistory, createGroup, ungroup } = useCanvasStore()
+  const { nodes, selectedNodeId, selectedNodeIds, setSelectedNode, deleteNode, updateNode, snapshotHistory, createGroup, ungroup, removeFromGroup } = useCanvasStore()
+  const serviceStatuses = useCanvasStore((s) => s.serviceStatuses)
 
   const [addingForNode, setAddingForNode] = useState<string | null>(null)
   const [newSvc, setNewSvc] = useState<SvcForm>(EMPTY_FORM)
@@ -64,6 +65,9 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
         node={node}
         nodes={nodes}
         onUngroup={() => { ungroup(node.id) }}
+        onRemoveChild={(id) => { snapshotHistory(); removeFromGroup(node.id, id) }}
+        onChangeDescription={(value) => updateNode(node.id, { notes: value })}
+        onSnapshotBeforeEdit={snapshotHistory}
         onToggleBorder={() => {
           snapshotHistory()
           updateNode(node.id, {
@@ -314,7 +318,7 @@ export function DetailPanel({ onEdit }: DetailPanelProps) {
               editingIndex === i ? (
                 <ServiceForm key={`edit-${i}`} form={editSvc} onChange={setEditSvc} onConfirm={handleSaveEdit} onCancel={() => setEditingFor(null)} confirmLabel="Save" autoFocus />
               ) : (
-                <ServiceBadge key={`${svc.port ?? 'host'}-${svc.protocol}-${svc.path ?? ''}-${i}`} svc={svc} host={host} onEdit={() => handleStartEdit(i)} onRemove={() => handleRemoveService(i)} />
+                <ServiceBadge key={`${svc.port ?? 'host'}-${svc.protocol}-${svc.path ?? ''}-${i}`} svc={svc} host={host} status={serviceStatuses[serviceStatusKey(node.id, svc.port, svc.protocol)]} onEdit={() => handleStartEdit(i)} onRemove={() => handleRemoveService(i)} />
               )
             )}
           </div>
@@ -425,16 +429,32 @@ interface GroupDetailPanelProps {
   node: Node<NodeData>
   nodes: Node<NodeData>[]
   onUngroup: () => void
+  onRemoveChild: (id: string) => void
+  onChangeDescription: (value: string) => void
+  onSnapshotBeforeEdit: () => void
   onToggleBorder: () => void
   onClose: () => void
   onSelectChild: (id: string) => void
 }
 
-function GroupDetailPanel({ node, nodes, onUngroup, onToggleBorder, onClose, onSelectChild }: GroupDetailPanelProps) {
+function GroupDetailPanel({ node, nodes, onUngroup, onRemoveChild, onChangeDescription, onSnapshotBeforeEdit, onToggleBorder, onClose, onSelectChild }: GroupDetailPanelProps) {
   const children = nodes.filter((n) => n.parentId === node.id)
   const onlineCount = children.filter((n) => n.data.status === 'online').length
   const offlineCount = children.filter((n) => n.data.status === 'offline').length
   const showBorder = node.data.custom_colors?.show_border !== false
+
+  // Description reuses data.notes, which already round-trips to the backend.
+  // Controlled + committed on every keystroke so ANY save path (incl. Ctrl+S,
+  // which never blurs the field) captures it. History is snapshotted once at the
+  // start of an edit session so the whole edit is a single undo step.
+  const snappedRef = useRef(false)
+  const handleDescriptionChange = (value: string) => {
+    if (!snappedRef.current) {
+      onSnapshotBeforeEdit()
+      snappedRef.current = true
+    }
+    onChangeDescription(value)
+  }
 
   const handleUngroup = () => {
     if (confirm(`Ungroup "${node.data.label}"? Nodes will be released to the canvas.`)) {
@@ -461,20 +481,48 @@ function GroupDetailPanel({ node, nodes, onUngroup, onToggleBorder, onClose, onS
         {offlineCount > 0 && <span style={{ color: STATUS_COLORS.offline }}>● {offlineCount} offline</span>}
       </div>
 
+      {/* Description */}
+      <div className="px-4 py-3 border-b border-border">
+        <label htmlFor="group-description" className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          Description
+        </label>
+        <textarea
+          id="group-description"
+          value={node.data.notes ?? ''}
+          onFocus={() => { snappedRef.current = false }}
+          onChange={(e) => handleDescriptionChange(e.target.value)}
+          placeholder="Add a description for this group…"
+          rows={3}
+          className="mt-1.5 w-full resize-y rounded-md bg-[#21262d] border border-[#30363d] px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-[#00d4ff]/50"
+        />
+      </div>
+
       {/* Children list */}
       <div className="flex-1 px-4 py-3 space-y-1.5 overflow-y-auto">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">Members</span>
         {children.length === 0 && <p className="text-xs text-muted-foreground/50">No nodes in this group.</p>}
         {children.map((child) => (
-          <button
+          <div
             key={child.id}
-            onClick={() => onSelectChild(child.id)}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md bg-[#21262d] text-xs hover:bg-[#30363d] transition-colors text-left"
+            className="group/member w-full flex items-center gap-2 px-2 py-1.5 rounded-md bg-[#21262d] text-xs hover:bg-[#30363d] transition-colors"
           >
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLORS[child.data.status] }} />
-            <span className="truncate text-foreground font-medium">{child.data.label}</span>
-            <span className="ml-auto text-muted-foreground shrink-0">{NODE_TYPE_LABELS[child.data.type] ?? child.data.type}</span>
-          </button>
+            <button
+              onClick={() => onSelectChild(child.id)}
+              className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer"
+            >
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: STATUS_COLORS[child.data.status] }} />
+              <span className="truncate text-foreground font-medium">{child.data.label}</span>
+              <span className="ml-auto text-muted-foreground shrink-0">{NODE_TYPE_LABELS[child.data.type] ?? child.data.type}</span>
+            </button>
+            <button
+              onClick={() => onRemoveChild(child.id)}
+              aria-label={`Remove ${child.data.label} from group`}
+              title="Remove from group"
+              className="shrink-0 opacity-0 group-hover/member:opacity-100 transition-opacity text-[#8b949e] hover:text-[#f85149] cursor-pointer"
+            >
+              <X size={12} />
+            </button>
+          </div>
         ))}
       </div>
 
@@ -673,9 +721,13 @@ const CATEGORY_COLORS: Record<string, string> = {
   web: '#00d4ff', database: '#a855f7', monitoring: '#39d353', storage: '#e3b341', security: '#f85149', remote: '#8b949e',
 }
 
-function ServiceBadge({ svc, host, onEdit, onRemove }: { svc: ServiceInfo; host?: string; onEdit: () => void; onRemove: () => void }) {
+function ServiceBadge({ svc, host, status, onEdit, onRemove }: { svc: ServiceInfo; host?: string; status?: ServiceStatus; onEdit: () => void; onRemove: () => void }) {
   const url = getServiceUrl(svc, host)
-  const color = CATEGORY_COLORS[svc.category ?? ''] ?? '#8b949e'
+  // Manually-added services carry no category, so they fell back to grey even
+  // when they're reachable HTTP/HTTPS. Treat any resolvable web URL as `web`.
+  const categoryColor = CATEGORY_COLORS[svc.category ?? ''] ?? (url ? CATEGORY_COLORS.web : '#8b949e')
+  // A live offline service overrides the category colour with red.
+  const color = status === 'offline' ? '#f85149' : categoryColor
   const pathLabel = svc.path?.trim() ? svc.path.trim() : ''
 
   return (
